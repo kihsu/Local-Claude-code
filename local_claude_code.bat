@@ -4,17 +4,18 @@ setlocal EnableDelayedExpansion
 :: ─────────────────────────────────────────
 :: Configuration
 :: ─────────────────────────────────────────
-:: Change for your own model
+:: Change these values for your setup
 set MODEL=mistralai/ministral-3-3b
 set ANTHROPIC_BASE_URL=http://localhost:1234
 set CLAUDE_CODE_ATTRIBUTION_HEADER=0
+
+:: Configuration file for last directory
 set CONFIG_FILE=%APPDATA%\local_claude_code\last_dir.txt
-:: ANTHROPIC_AUTH_TOKEN is a dummy value required by the CLI when using a local endpoint
+
+:: Dummy token for local endpoint
 set ANTHROPIC_AUTH_TOKEN=lmstudio
 
-:: ─────────────────────────────────────────
-:: Check lms is available and if LM Studio is already running
-:: ─────────────────────────────────────────
+:: Check if LM Studio is installed and running
 where lms >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] 'lms' not found in PATH. Make sure LM Studio CLI is installed and on your PATH.
@@ -22,23 +23,23 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-set LMS_STARTED_BY_US=0
+set LMS_STARTED_BY_SCRIPT=0
 tasklist /FI "IMAGENAME eq LM Studio.exe" 2>nul | find /I "LM Studio.exe" >nul
 if %ERRORLEVEL% equ 0 (
     echo [WARN] LM Studio is already running. It will not be shut down when this script exits.
 ) else (
-    set LMS_STARTED_BY_US=1
+    set LMS_STARTED_BY_SCRIPT=1
 )
 
 :: ─────────────────────────────────────────
-:: Check if a model is already loaded or load it if not
+:: Load or Check Model
 :: ─────────────────────────────────────────
-set MODEL_LOADED_BY_US=0
+set MODEL_LOADED_BY_SCRIPT=0
 set LOADED_MODEL=
 set LOADED_MODEL_ID=
 set ACTIVE_MODEL=%MODEL%
 
-if !LMS_STARTED_BY_US! equ 0 (
+if !LMS_STARTED_BY_SCRIPT! equ 0 (
     for /f "usebackq delims=" %%I in (`lms ps --json 2^>nul`) do set "LOADED_MODEL=%%I"
     if "!LOADED_MODEL!"=="[]" set LOADED_MODEL=
 )
@@ -61,7 +62,7 @@ if defined LOADED_MODEL (
         pause
         exit /b 1
     )
-    set MODEL_LOADED_BY_US=1
+    set MODEL_LOADED_BY_SCRIPT=1
 )
 
 :: ─────────────────────────────────────────
@@ -100,9 +101,7 @@ if not defined WORK_DIR (
     exit /b 0
 )
 
-:: ─────────────────────────────────────────
 :: Save selected directory for next run
-:: ─────────────────────────────────────────
 if not exist "%APPDATA%\local_claude_code" mkdir "%APPDATA%\local_claude_code"
 (echo !WORK_DIR!)>"%CONFIG_FILE%"
 
@@ -119,7 +118,7 @@ if !ERRORLEVEL! neq 0 (
 echo [INFO] Working directory: !WORK_DIR!
 
 :: ─────────────────────────────────────────
-:: Ask whether to resume a session
+:: Resume Session Options
 :: ─────────────────────────────────────────
 set CLAUDE_RESUME_FLAG=
 echo.
@@ -139,11 +138,11 @@ claude %CLAUDE_RESUME_FLAG% --model "!ACTIVE_MODEL!"
 :: ─────────────────────────────────────────
 :: Cleanup
 :: ─────────────────────────────────────────
-if !LMS_STARTED_BY_US! equ 1 (
+if !LMS_STARTED_BY_SCRIPT! equ 1 (
     taskkill /IM "LM Studio.exe" /F /FI "STATUS eq RUNNING" >nul 2>&1
     echo [INFO] LM Studio shut down.
 ) else (
-    if !MODEL_LOADED_BY_US! equ 1 (
+    if !MODEL_LOADED_BY_SCRIPT! equ 1 (
         echo [INFO] Unloading model: %MODEL%
         lms unload "%MODEL%" >nul 2>&1
     ) else (
