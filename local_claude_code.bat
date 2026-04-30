@@ -117,7 +117,7 @@ set ESCAPED_DIR=!WORK_DIR:\=\\!
 )>"%CONFIG_FILE%"
 
 :use_dir
-pushd "!WORK_DIR!"
+cd /d "!WORK_DIR!"
 if !ERRORLEVEL! neq 0 (
     echo [ERROR] Failed to change directory to: !WORK_DIR!
     set WORK_DIR=
