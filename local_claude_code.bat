@@ -10,7 +10,7 @@ set ANTHROPIC_BASE_URL=http://localhost:1234
 set CLAUDE_CODE_ATTRIBUTION_HEADER=0
 
 :: Configuration file for last directory
-set CONFIG_FILE=%APPDATA%\local_claude_code\last_dir.txt
+set CONFIG_FILE=%APPDATA%\local_claude_code\config.json
 
 :: Dummy token for local endpoint
 set ANTHROPIC_AUTH_TOKEN=lmstudio
@@ -28,7 +28,21 @@ tasklist /FI "IMAGENAME eq LM Studio.exe" 2>nul | find /I "LM Studio.exe" >nul
 if %ERRORLEVEL% equ 0 (
     echo [WARN] LM Studio is already running. It will not be shut down when this script exits.
 ) else (
+	lms server start
+    if !ERRORLEVEL! neq 0 (
+        echo [ERROR] Failed to start LM Studio server.
+        pause
+        exit /b 1
+    )
     set LMS_STARTED_BY_SCRIPT=1
+)
+
+:: ─────────────────────────────────────────
+:: Read JSON config file
+:: ─────────────────────────────────────────
+set SAVED_DIR=
+if exist "%CONFIG_FILE%" (
+    for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "(Get-Content '%CONFIG_FILE%' | ConvertFrom-Json).dir"`) do set "SAVED_DIR=%%I"
 )
 
 :: ─────────────────────────────────────────
@@ -36,8 +50,7 @@ if %ERRORLEVEL% equ 0 (
 :: ─────────────────────────────────────────
 set MODEL_LOADED_BY_SCRIPT=0
 set LOADED_MODEL=
-set LOADED_MODEL_ID=
-set ACTIVE_MODEL=%MODEL%
+set ACTIVE_MODEL=
 
 if !LMS_STARTED_BY_SCRIPT! equ 0 (
     for /f "usebackq delims=" %%I in (`lms ps --json 2^>nul`) do set "LOADED_MODEL=%%I"
@@ -45,42 +58,46 @@ if !LMS_STARTED_BY_SCRIPT! equ 0 (
 )
 
 if defined LOADED_MODEL (
-    for /f "usebackq delims=" %%I in (`powershell -noprofile -command "(lms ps --json | ConvertFrom-Json)[0].modelKey"`) do set "LOADED_MODEL_ID=%%I"
-
-    echo !LOADED_MODEL_ID! | find /I "%MODEL%" >nul
-    if !ERRORLEVEL! equ 0 (
-        echo [WARN] Configured model is already loaded: !LOADED_MODEL_ID!. Will use it as-is.
-    ) else (
-        echo [WARN] A different model is already loaded: !LOADED_MODEL_ID!
-        echo [WARN] To use %MODEL% instead, close LM Studio and restart this script.
-        set ACTIVE_MODEL=!LOADED_MODEL_ID!
-    )
-) else (
-    lms load "%MODEL%"
-    if !ERRORLEVEL! neq 0 (
-        echo [ERROR] Failed to load model: %MODEL%
-        pause
-        exit /b 1
-    )
-    set MODEL_LOADED_BY_SCRIPT=1
+    for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "(lms ps --json | ConvertFrom-Json)[0].modelKey"`) do set "ACTIVE_MODEL=%%I"
+    echo [WARN] A model is already loaded: !ACTIVE_MODEL!. Will use it as-is.
+    goto model_selected
 )
 
-:: ─────────────────────────────────────────
-:: Load last used directory if it exists
-:: ─────────────────────────────────────────
-set WORK_DIR=
-if exist "%CONFIG_FILE%" (
-    for /f "usebackq delims=" %%I in ("%CONFIG_FILE%") do set "WORK_DIR=%%I"
-    set WORK_DIR=!WORK_DIR:"=!
-    if not exist "!WORK_DIR!\" (
-        echo [WARN] Last directory no longer exists: !WORK_DIR!
-        set WORK_DIR=
-    )
+:select_model
+lms load
+if !ERRORLEVEL! neq 0 (
+    echo [WARN] No model selected.
+    choice /m "Would you like to select a model again"
+    if !ERRORLEVEL! equ 1 goto select_model
+    echo [INFO] Exiting.
+    pause
+    exit /b 0
 )
+
+for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "(lms ps --json | ConvertFrom-Json)[0].modelKey"`) do set "ACTIVE_MODEL=%%I"
+
+if not defined ACTIVE_MODEL (
+    echo [ERROR] Could not determine loaded model.
+    pause
+    exit /b 1
+)
+set MODEL_LOADED_BY_SCRIPT=1
+
+:model_selected
+echo [INFO] Active model: !ACTIVE_MODEL!
 
 :: ─────────────────────────────────────────
 :: Confirm or select working directory
 :: ─────────────────────────────────────────
+set WORK_DIR=
+if defined SAVED_DIR (
+    if exist "!SAVED_DIR!\" (
+        set "WORK_DIR=!SAVED_DIR!"
+    ) else (
+        echo [WARN] Last directory no longer exists: !SAVED_DIR!
+    )
+)
+
 :select_dir
 if defined WORK_DIR (
     echo [INFO] Last used directory: !WORK_DIR!
@@ -101,9 +118,14 @@ if not defined WORK_DIR (
     exit /b 0
 )
 
-:: Save selected directory for next run
+:: Save config for next run
 if not exist "%APPDATA%\local_claude_code" mkdir "%APPDATA%\local_claude_code"
-(echo !WORK_DIR!)>"%CONFIG_FILE%"
+set ESCAPED_DIR=!WORK_DIR:\=\\!
+(
+    echo {
+    echo     "dir": "!ESCAPED_DIR!"
+    echo }
+)>"%CONFIG_FILE%"
 
 :use_dir
 cd /d "!WORK_DIR!"
